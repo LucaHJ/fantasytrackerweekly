@@ -1,0 +1,106 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>NBA Fantasy Team Weekly Stats</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <div class="app">
+        <h1>NBA Fantasy Team Weekly Stats</h1>
+        <div class="subtitle">
+            Enter <strong>weekly team totals</strong> for FG%, FT%, 3PTM, PTS, REB, AST, ST, BLK, TO.
+        </div>
+
+        <!-- Main Week View card -->
+        <div class="card">
+            <div class="row">
+                <div class="flex-1">
+                    <label for="weekSelect">Week</label>
+                    <div class="row">
+                        <div class="flex-1">
+                            <select id="weekSelect"></select>
+                        </div>
+                        <button id="addWeekBtn" type="button" class="admin-only">+ Add week</button>
+                        <button id="editWeekBtn" type="button" class="secondary admin-only">Edit week</button>
+                        <button id="deleteWeekBtn" type="button" class="secondary admin-only">Delete week</button>
+                    </div>
+                </div>
+
+                <div class="flex-1">
+                    <label>Teams</label>
+                    <div class="row">
+                        <button id="addTeamBtn" type="button" class="admin-only">+ Add team</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="statsTable"></table>
+            </div>
+
+            <div id="status" class="status"></div>
+        </div>
+
+        <!-- Team View card -->
+        <div class="card" style="margin-top: 16px;">
+            <div class="section-title">Team view</div>
+            <div class="row">
+                <div class="flex-1">
+                    <label for="teamViewSelect">Team</label>
+                    <select id="teamViewSelect"></select>
+                </div>
+                <button id="editTeamNameBtn" type="button" class="secondary admin-only">
+                    Edit team name / owner
+                </button>
+                <button id="teamViewRefreshBtn" type="button" class="secondary">
+                    Refresh team view
+                </button>
+            </div>
+
+            <!-- Chart for selected team -->
+            <div class="chart-container">
+                <div class="chart-header">
+                    <div class="chart-title" id="teamChartTitle">Trend by week</div>
+                    <div id="teamChartMetricLabel" class="chart-metric-label"></div>
+                </div>
+                <canvas id="teamChart" class="chart-canvas" height="220"></canvas>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="teamViewTable"></table>
+            </div>
+
+            <div id="teamViewStatus" class="status"></div>
+        </div>
+
+        <!-- Archive / Recycle bin -->
+        <div class="card admin-only" style="margin-top: 16px;">
+            <div class="section-title">Archive (Deleted items)</div>
+
+            <details open>
+                <summary>Deleted weeks</summary>
+                <div id="deletedWeeksContainer" class="trash-list"></div>
+            </details>
+
+            <details>
+                <summary>Deleted teams</summary>
+                <div id="deletedTeamsContainer" class="trash-list"></div>
+            </details>
+        </div>
+
+        <!-- Admin bar -->
+        <div class="admin-bar">
+            <button id="adminToggleBtn" type="button" class="secondary">
+                Admin log in
+            </button>
+            <div class="admin-hint">
+                Admin mode lets you add / edit weeks, teams and stats on this device.
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
