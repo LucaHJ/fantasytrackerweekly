@@ -1,4 +1,5 @@
-const API_BASE = ""; // same origin
+const path = window.location.pathname;
+const API_BASE = path.startsWith("/fantasy") ? "/fantasy" : "";
 
 // DOM references -----------------------------------------------------------
 
