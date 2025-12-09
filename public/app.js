@@ -179,7 +179,7 @@ function renderWeekSelect() {
     });
 
     if (!currentWeekId && weeks.length > 0) {
-        currentWeekId = weeks[0].id;
+        currentWeekId = weeks[weeks.length - 1].id;
     }
 
     if (currentWeekId) {
@@ -338,7 +338,7 @@ async function deleteWeek() {
         weeks = weeks.filter((w) => w.id !== currentWeekId);
 
         if (weeks.length > 0) {
-            currentWeekId = weeks[0].id;
+            currentWeekId = weeks[weeks.length - 1].id;
         } else {
             currentWeekId = null;
         }
@@ -364,7 +364,7 @@ async function restoreWeek(id) {
         await loadDeletedWeeks();
 
         if (!currentWeekId && weeks.length > 0) {
-            currentWeekId = weeks[0].id;
+            currentWeekId = weeks[weeks.length - 1].id;
         }
         if (currentWeekId) {
             weekSelect.value = String(currentWeekId);
@@ -970,6 +970,150 @@ async function loadTeamView() {
                 totalRank: null,
             }));
 
+            // --- compute per-stat ranks + total (unchanged) ---
+            for (const stat of statDefs) {
+                const { field, highBetter } = stat;
+                const items = weekRows.map((row, index) => {
+                    const vRaw = row[field];
+                    const hasVal =
+                        vRaw !== null && vRaw !== undefined && vRaw !== "";
+                    let value = Number(hasVal ? vRaw : NaN);
+                    if (!hasVal || Number.isNaN(value)) {
+                        value = highBetter
+                            ? Number.NEGATIVE_INFINITY
+                            : Number.POSITIVE_INFINITY;
+                    }
+                    return { index, value };
+                });
+
+                items.sort((a, b) => {
+                    if (a.value === b.value) return 0;
+                    return highBetter ? b.value - a.value : a.value - b.value;
+                });
+
+                let rank = 1;
+                for (let i = 0; i < items.length; i++) {
+                    if (i > 0 && items[i].value !== items[i - 1].value) {
+                        rank = i + 1;
+                    }
+                    const rowIndex = items[i].index;
+                    const bracket = n + 1 - rank;
+                    weekRanking[rowIndex].perStat[field] = { rank, bracket };
+                    weekRanking[rowIndex].totalScore += bracket;
+                }
+            }
+
+            // assign total ranks
+            const totalItems = weekRanking.map((r, index) => ({
+                index,
+                value: r.totalScore,
+            }));
+            totalItems.sort((a, b) => b.value - a.value);
+
+            let rank = 1;
+            for (let i = 0; i < totalItems.length; i++) {
+                if (i > 0 && totalItems[i].value !== totalItems[i - 1].value) {
+                    rank = i + 1;
+                }
+                weekRanking[totalItems[i].index].totalRank = rank;
+            }
+
+            // --- league stats per week for each metric (avg, max, min) ---
+            const leagueWeekStats = {};
+
+            // FG%..TO
+            for (const stat of statDefs) {
+                const field = stat.field;
+                const vals = weekRows
+                    .map((row) => Number(row[field]))
+                    .filter((v) => !Number.isNaN(v));
+                if (vals.length) {
+                    const sum = vals.reduce((a, b) => a + b, 0);
+                    leagueWeekStats[field] = {
+                        avg: sum / vals.length,
+                        max: Math.max(...vals),
+                        min: Math.min(...vals),
+                    };
+                } else {
+                    leagueWeekStats[field] = { avg: null, max: null, min: null };
+                }
+            }
+
+            // "total" using totalScore from ranking
+            {
+                const vals = weekRanking
+                    .map((r) => Number(r.totalScore))
+                    .filter((v) => !Number.isNaN(v));
+                if (vals.length) {
+                    const sum = vals.reduce((a, b) => a + b, 0);
+                    leagueWeekStats.total = {
+                        avg: sum / vals.length,
+                        max: Math.max(...vals),
+                        min: Math.min(...vals),
+                    };
+                } else {
+                    leagueWeekStats.total = { avg: null, max: null, min: null };
+                }
+            }
+
+            // --- pick this team's row for this week ---
+            const idx = weekRows.findIndex((r) => r.team_id === teamId);
+            if (idx === -1) continue;
+
+            const row = weekRows[idx];
+            const rInfo = weekRanking[idx];
+
+            teamViewData.push({
+                weekId: w.id,
+                weekNumber: w.week_number,
+                label: weekLabelFromNumber(w.week_number),
+                row,
+                ranking: rInfo,
+                teamCount: n,
+                leagueWeekStats, // NEW
+            });
+        }
+
+        renderTeamViewTable();
+        setTeamViewStatus("Loaded", "ok");
+    } catch (err) {
+        console.error(err);
+        clearTeamChart();
+        setTeamViewStatus("Error loading team view", "err");
+    }
+}
+ {
+    const teamId = Number(teamViewSelect.value);
+    if (!teamId) {
+        teamViewTable.innerHTML = "<tr><td>Select a team.</td></tr>";
+        clearTeamChart();
+        setTeamViewStatus("", "");
+        return;
+    }
+    if (!weeks.length) {
+        teamViewTable.innerHTML = "<tr><td>No weeks available.</td></tr>";
+        clearTeamChart();
+        setTeamViewStatus("", "");
+        return;
+    }
+
+    setTeamViewStatus("Loading team view...", "");
+    teamViewData = [];
+
+    try {
+        for (const w of weeks) {
+            const weekRows = await fetchJSON(
+                `${API_BASE}/api/stats?weekId=${encodeURIComponent(w.id)}`
+            );
+            if (!Array.isArray(weekRows) || weekRows.length === 0) continue;
+
+            const n = weekRows.length;
+            const weekRanking = weekRows.map(() => ({
+                perStat: {},
+                totalScore: 0,
+                totalRank: null,
+            }));
+
             for (const stat of statDefs) {
                 const { field, highBetter } = stat;
                 const items = weekRows.map((row, index) => {
@@ -1252,6 +1396,230 @@ function describeMetric(metric) {
 }
 
 function drawTeamChart() {
+    if (!teamChartCtx) return;
+
+    const displayWidth = teamChartCanvas.clientWidth || 600;
+    teamChartCanvas.width = displayWidth;
+
+    const width = teamChartCanvas.width;
+    const height = teamChartCanvas.height;
+
+    teamChartCtx.clearRect(0, 0, width, height);
+
+    if (!teamViewData || teamViewData.length === 0) {
+        teamChartMetricLabel.textContent = "";
+        return;
+    }
+
+    const ordered = [...teamViewData].sort(
+        (a, b) => a.weekNumber - b.weekNumber
+    );
+    const labels = ordered.map((e) => e.label);
+
+    // Team values over time
+    const teamValues = ordered.map((entry) => {
+        if (teamChartMetric === "total") {
+            const v =
+                entry.ranking && typeof entry.ranking.totalScore === "number"
+                    ? entry.ranking.totalScore
+                    : null;
+            return Number.isNaN(Number(v)) ? null : Number(v);
+        } else {
+            const v = entry.row[teamChartMetric];
+            const num = Number(v);
+            return Number.isNaN(num) ? null : num;
+        }
+    });
+
+    // League weekly averages
+    const leagueAvgValues = ordered.map((entry) => {
+        const s =
+            entry.leagueWeekStats &&
+            entry.leagueWeekStats[teamChartMetric || "total"];
+        if (!s) return null;
+        const num = Number(s.avg);
+        return Number.isNaN(num) ? null : num;
+    });
+
+    // Global extremes
+    const teamValsNumeric = teamValues.filter(
+        (v) => v !== null && !Number.isNaN(v)
+    );
+    const leagueAvgNumeric = leagueAvgValues.filter(
+        (v) => v !== null && !Number.isNaN(v)
+    );
+
+    const leagueMaxVals = ordered
+        .map((e) => {
+            const s =
+                e.leagueWeekStats &&
+                e.leagueWeekStats[teamChartMetric || "total"];
+            if (!s) return null;
+            const num = Number(s.max);
+            return Number.isNaN(num) ? null : num;
+        })
+        .filter((v) => v !== null && !Number.isNaN(v));
+
+    const leagueMinVals = ordered
+        .map((e) => {
+            const s =
+                e.leagueWeekStats &&
+                e.leagueWeekStats[teamChartMetric || "total"];
+            if (!s) return null;
+            const num = Number(s.min);
+            return Number.isNaN(num) ? null : num;
+        })
+        .filter((v) => v !== null && !Number.isNaN(v));
+
+    const teamGlobalMax =
+        teamValsNumeric.length > 0 ? Math.max(...teamValsNumeric) : null;
+    const teamGlobalMin =
+        teamValsNumeric.length > 0 ? Math.min(...teamValsNumeric) : null;
+    const leagueGlobalMax =
+        leagueMaxVals.length > 0 ? Math.max(...leagueMaxVals) : null;
+    const leagueGlobalMin =
+        leagueMinVals.length > 0 ? Math.min(...leagueMinVals) : null;
+
+    // All values that affect Y scale
+    const scaleValues = [
+        ...teamValsNumeric,
+        ...leagueAvgNumeric,
+        leagueGlobalMax,
+        leagueGlobalMin,
+        teamGlobalMax,
+        teamGlobalMin,
+    ].filter((v) => v !== null && !Number.isNaN(v));
+
+    if (!scaleValues.length) {
+        teamChartMetricLabel.textContent =
+            describeMetric(teamChartMetric) + " — no numeric data";
+        return;
+    }
+
+    let min = Math.min(...scaleValues);
+    let max = Math.max(...scaleValues);
+
+    if (min === max) {
+        const pad = Math.abs(min || 1) * 0.1;
+        min -= pad;
+        max += pad;
+    }
+
+    const paddingLeft = 40;
+    const paddingRight = 10;
+    const paddingTop = 20;
+    const paddingBottom = 24;
+
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
+
+    function xForIndex(i) {
+        if (labels.length === 1) return paddingLeft + plotWidth / 2;
+        return paddingLeft + (i / (labels.length - 1)) * plotWidth;
+    }
+    function yForValue(v) {
+        const t = (v - min) / (max - min);
+        return paddingTop + (1 - t) * plotHeight;
+    }
+
+    // Axes
+    teamChartCtx.strokeStyle = "#4b5563";
+    teamChartCtx.lineWidth = 1;
+
+    // y-axis
+    teamChartCtx.beginPath();
+    teamChartCtx.moveTo(paddingLeft, paddingTop);
+    teamChartCtx.lineTo(paddingLeft, paddingTop + plotHeight);
+    teamChartCtx.stroke();
+
+    // x-axis
+    teamChartCtx.beginPath();
+    teamChartCtx.moveTo(paddingLeft, paddingTop + plotHeight);
+    teamChartCtx.lineTo(paddingLeft + plotWidth, paddingTop + plotHeight);
+    teamChartCtx.stroke();
+
+    // Y labels
+    teamChartCtx.fillStyle = "#9ca3af";
+    teamChartCtx.font = "11px system-ui";
+    teamChartCtx.textAlign = "right";
+    teamChartCtx.textBaseline = "middle";
+
+    teamChartCtx.fillText(max.toFixed(2), paddingLeft - 4, yForValue(max));
+    teamChartCtx.fillText(min.toFixed(2), paddingLeft - 4, yForValue(min));
+
+    // X labels
+    teamChartCtx.textAlign = "center";
+    teamChartCtx.textBaseline = "top";
+    labels.forEach((label, i) => {
+        const x = xForIndex(i);
+        const y = paddingTop + plotHeight + 4;
+        teamChartCtx.fillText(label, x, y);
+    });
+
+    // Helper to draw a line series
+    function drawSeries(values, color, width = 2, dashed = false) {
+        const nums = values.map((v) =>
+            v === null || Number.isNaN(v) ? null : Number(v)
+        );
+        if (!nums.some((v) => v !== null)) return;
+
+        teamChartCtx.strokeStyle = color;
+        teamChartCtx.lineWidth = width;
+        teamChartCtx.setLineDash(dashed ? [4, 4] : []);
+        teamChartCtx.beginPath();
+
+        let started = false;
+        nums.forEach((v, i) => {
+            if (v === null) {
+                started = false;
+                return;
+            }
+            const x = xForIndex(i);
+            const y = yForValue(v);
+            if (!started) {
+                teamChartCtx.moveTo(x, y);
+                started = true;
+            } else {
+                teamChartCtx.lineTo(x, y);
+            }
+        });
+        teamChartCtx.stroke();
+        teamChartCtx.setLineDash([]);
+    }
+
+    // 1) Team line (solid)
+    drawSeries(teamValues, "#3b82f6", 2, false);
+
+    // 2) League average over time (solid, different colour)
+    drawSeries(leagueAvgValues, "#10b981", 1.5, false);
+
+    // 3) Constant lines for extremes (dashed)
+    function drawConstLine(value, color) {
+        if (value === null || Number.isNaN(value)) return;
+        const y = yForValue(value);
+        teamChartCtx.strokeStyle = color;
+        teamChartCtx.lineWidth = 1;
+        teamChartCtx.setLineDash([6, 4]);
+        teamChartCtx.beginPath();
+        teamChartCtx.moveTo(paddingLeft, y);
+        teamChartCtx.lineTo(paddingLeft + plotWidth, y);
+        teamChartCtx.stroke();
+        teamChartCtx.setLineDash([]);
+    }
+
+    // historical league highest & lowest
+    drawConstLine(leagueGlobalMax, "#f97316"); // orange
+    drawConstLine(leagueGlobalMin, "#f97316");
+
+    // team's highest & lowest
+    drawConstLine(teamGlobalMax, "#8b5cf6"); // purple
+    drawConstLine(teamGlobalMin, "#8b5cf6");
+
+    teamChartMetricLabel.textContent =
+        describeMetric(teamChartMetric) +
+        " — blue: team, green: league avg, orange: league max/min, purple: team max/min";
+}
+ {
     if (!teamChartCtx) return;
 
     const displayWidth = teamChartCanvas.clientWidth || 600;
@@ -1728,7 +2096,7 @@ deletedTeamsContainer.addEventListener("click", (e) => {
         ]);
 
         if (weeks.length > 0) {
-            currentWeekId = weeks[0].id;
+            currentWeekId = weeks[weeks.length - 1].id;
             weekSelect.value = String(currentWeekId);
             await loadStatsForCurrentWeek();
         }
