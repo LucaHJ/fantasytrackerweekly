@@ -1,6 +1,14 @@
 const path = window.location.pathname;
 const API_BASE = path.startsWith("/fantasy") ? "/fantasy" : "";
 
+if (downloadDbBtn) {
+    downloadDbBtn.addEventListener("click", () => {
+        if (!ensureAdmin()) return; // reuse your admin check
+        // Just open the export URL; browser will download fantasy.db
+        window.location.href = `${API_BASE}/api/export-db`;
+    });
+}
+
 // DOM references -----------------------------------------------------------
 
 const weekSelect = document.getElementById("weekSelect");
@@ -30,6 +38,7 @@ let teamChartMetric = "total";
 // Admin mode ---------------------------------------------------------------
 
 const adminToggleBtn = document.getElementById("adminToggleBtn");
+const downloadDbBtn = document.getElementById("downloadDbBtn");
 const ADMIN_STORAGE_KEY = "fantasyAdminMode";
 let isAdmin = false;
 

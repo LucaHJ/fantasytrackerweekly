@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
 
@@ -420,6 +421,36 @@ app.get("/api/stats", async (req, res) => {
         res.status(500).send("Error fetching stats");
     }
 });
+
+// Download the raw SQLite DB file as a backup
+app.get("/api/export-db", (req, res) => {
+    const dbPath = path.join(__dirname, "fantasy.db");
+
+    fs.stat(dbPath, (err, stats) => {
+        if (err || !stats.isFile()) {
+            console.error("DB export error:", err);
+            return res.status(500).send("Database file not found");
+        }
+
+        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader(
+            "Content-Disposition",
+            'attachment; filename="fantasy.db"'
+        );
+
+        const stream = fs.createReadStream(dbPath);
+        stream.on("error", (err) => {
+            console.error("DB export stream error:", err);
+            if (!res.headersSent) {
+                res.status(500).end("Error reading database file");
+            } else {
+                res.end();
+            }
+        });
+        stream.pipe(res);
+    });
+});
+
 
 // Upsert stats for a team-week
 app.post("/api/stats", async (req, res) => {
