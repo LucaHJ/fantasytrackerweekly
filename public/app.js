@@ -1098,6 +1098,7 @@ function drawTeamChart() {
         clearTeamChart();
         return;
     }
+}
 
     // Summary lines from backend
     const teamStatSummary =
