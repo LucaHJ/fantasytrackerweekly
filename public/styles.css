@@ -1,144 +1,142 @@
-/* Layout & general */
-
-*,
-*::before,
-*::after {
+* {
     box-sizing: border-box;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
     margin: 0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #020617;
+    background: #0f172a;
     color: #e5e7eb;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
 }
 
 .app {
-    max-width: 1200px;
-    margin: 0 auto;
+    max-width: 1100px;
+    width: 100%;
     padding: 16px;
 }
 
-.app-header {
-    margin-bottom: 16px;
+h1 {
+    margin: 0 0 4px 0;
+    font-size: 24px;
 }
 
-    .app-header h1 {
-        margin: 0 0 4px;
-        font-size: 1.6rem;
-    }
-
-    .app-header p {
-        margin: 0;
-        color: #9ca3af;
-    }
-
-/* Cards */
+.subtitle {
+    font-size: 13px;
+    color: #9ca3af;
+    margin-bottom: 12px;
+}
 
 .card {
     background: #020617;
-    border-radius: 0.75rem;
+    border-radius: 12px;
     border: 1px solid #1f2937;
-    padding: 16px;
-    margin-bottom: 16px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    padding: 12px 14px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-.card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-    gap: 8px;
-}
-
-    .card-header h2 {
-        margin: 0;
-        font-size: 1.1rem;
-    }
-
-.card-subheader {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
     margin-bottom: 8px;
 }
 
-.hint {
-    font-size: 0.85rem;
-    color: #9ca3af;
-}
-
-.inline-controls {
-    display: flex;
-    gap: 8px;
-}
-
-/* Controls */
-
-.week-controls,
-.team-view-controls {
+.row {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.flex-1 {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 label {
-    font-size: 0.9rem;
+    font-size: 12px;
+    color: #9ca3af;
+    display: block;
+    margin-bottom: 4px;
 }
 
-select {
+select,
+input[type="text"],
+input[type="number"] {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid #1f2937;
     background: #020617;
     color: #e5e7eb;
-    border: 1px solid #374151;
-    border-radius: 4px;
-    padding: 3px 6px;
+    font-size: 13px;
 }
+
+    select:focus,
+    input[type="text"]:focus,
+    input[type="number"]:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 1px #1d4ed8;
+    }
 
 button {
-    padding: 4px 10px;
-    border-radius: 4px;
-    border: 1px solid #374151;
-    background: #111827;
-    color: #e5e7eb;
-    font-size: 0.85rem;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: none;
+    font-size: 13px;
     cursor: pointer;
+    background: #2563eb;
+    color: white;
+    white-space: nowrap;
 }
 
-    button:hover {
-        background: #1f2937;
+    button.secondary {
+        background: #111827;
+        border: 1px solid #374151;
+        color: #e5e7eb;
     }
 
     button.danger {
-        border-color: #b91c1c;
-        color: #fecaca;
-        background: #111827;
+        background: #b91c1c;
     }
 
-        button.danger:hover {
-            background: #450a0a;
-        }
-
-/* Tables */
+    button:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
 
 .table-wrapper {
-    overflow-x: auto;
+    margin-top: 8px;
+    border-radius: 10px;
+    border: 1px solid #1f2937;
+    overflow: auto;
+    background: #020617;
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: 12px;
 }
 
 th,
 td {
     padding: 6px 8px;
-    border-bottom: 1px solid #111827;
+    border-bottom: 1px solid #1f2937;
+}
+
+th {
+    background: #020617;
+    position: sticky;
+    top: 0;
+    z-index: 1;
     text-align: right;
-    white-space: nowrap;
+    font-weight: 500;
+    color: #9ca3af;
+    cursor: default;
 }
 
     th:first-child,
@@ -146,162 +144,149 @@ td {
         text-align: left;
     }
 
-thead th {
-    background: #020617;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-th[data-sort],
-th[data-chart] {
-    cursor: pointer;
-    color: #9ca3af;
-}
-
-    th[data-sort]:hover,
-    th[data-chart]:hover {
-        color: #e5e7eb;
+    /* Clickable sortable headers */
+    th.sortable {
+        cursor: pointer;
     }
 
-/* Team cell / owner */
+        th.sortable:hover {
+            background: #111827;
+        }
 
-.team-cell {
-    display: flex;
-    flex-direction: column;
+/* Rank shading: text color only for first/last */
+.rank-best {
+    color: #fbbf24;
 }
 
-.team-name {
-    font-weight: 600;
+.rank-worst {
+    color: #ef4444;
 }
 
-.team-owner {
-    font-size: 0.75rem;
-    color: #6b7280;
-}
-
-/* Stat cells & ranks */
-
-.stat-cell {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-}
-
-.stat-value {
-    font-variant-numeric: tabular-nums;
-}
-
-.stat-rank {
-    font-size: 0.7rem;
-    color: #9ca3af;
-}
-
-/* Rank coloring: only first & last (and total) */
-
-.rank-first {
-    color: #facc15; /* gold */
-}
-
-.rank-last {
-    color: #f97373; /* red */
-}
-
-/* Status */
-
+/* Status text */
 .status {
-    margin-top: 8px;
-    font-size: 0.85rem;
-    min-height: 1.2em;
+    margin-top: 6px;
+    font-size: 12px;
     color: #9ca3af;
 }
 
     .status.ok {
-        color: #4ade80;
+        color: #22c55e;
     }
 
     .status.err {
-        color: #f97373;
+        color: #ef4444;
     }
 
-/* Trash */
-
-.trash-columns {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 16px;
+/* Trash / archive */
+.trash-list {
+    margin-top: 6px;
+    font-size: 12px;
 }
 
-.trash-list table {
-    font-size: 0.8rem;
-}
+    .trash-list table {
+        font-size: 12px;
+    }
 
-.trash-list-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
+    .trash-list th,
+    .trash-list td {
+        padding: 4px 6px;
+    }
 
 /* Chart */
-
 .chart-container {
+    margin-top: 10px;
+    margin-bottom: 4px;
+    border-radius: 12px;
+    border: 1px solid #1f2937;
+    padding: 8px 10px 10px;
     background: #020617;
-    border-radius: 0.5rem;
-    border: 1px solid #111827;
-    padding: 8px;
-    overflow-x: auto;
 }
 
-#teamChart {
-    display: block;
-    max-width: 100%;
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+
+.chart-title {
+    font-size: 13px;
+    color: #e5e7eb;
+    font-weight: 500;
 }
 
 .chart-metric-label {
-    margin-top: 8px;
-    font-size: 0.85rem;
+    font-size: 11px;
     color: #9ca3af;
 }
 
-.chart-hint {
-    font-size: 0.8rem;
-    color: #9ca3af;
-    margin-top: 0;
-    margin-bottom: 8px;
+.chart-canvas {
+    width: 100%;
+    max-width: 100%;
+    display: block;
 }
 
-/* Admin bar */
-
-.admin-bar {
-    margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px solid #111827;
+/* Team header (team name + owner) */
+.team-name-cell {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.team-name-main {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.team-owner {
+    font-size: 11px;
+    color: #9ca3af;
+}
+
+/* Stat cell with value + rank */
+.stat-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.stat-value {
+    font-size: 12px;
+}
+
+.stat-rank {
+    font-size: 11px;
+}
+
+/* Admin footer */
+.admin-footer {
+    margin-top: 12px;
+    display: flex;
     align-items: center;
-    justify-content: space-between;
-    font-size: 0.8rem;
+    gap: 8px;
+    font-size: 12px;
+    color: #9ca3af;
 }
 
-.admin-hint {
-    color: #6b7280;
+.admin-toggle-btn {
+    background: #111827;
+    border: 1px solid #374151;
+    color: #e5e7eb;
+    padding: 4px 10px;
+    border-radius: 999px;
 }
 
-/* Admin visibility helpers */
+.admin-status-label {
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+/* Hide admin controls for non-admin users */
+.admin-only {
+    /* no-op; used for toggling via JS, see .admin-only-hidden */
+}
 
 .admin-only-hidden {
     display: none !important;
-}
-
-@media (max-width: 768px) {
-    .card-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .admin-bar {
-        flex-direction: column;
-        align-items: flex-start;
-    }
 }

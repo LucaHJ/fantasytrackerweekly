@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
 
@@ -13,7 +12,7 @@ const db = new sqlite3.Database(DB_FILE);
 db.serialize(() => {
     db.run("PRAGMA foreign_keys = ON");
 
-    // Teams now include owner_name
+    // Teams include owner_name and soft delete flag
     db.run(`
     CREATE TABLE IF NOT EXISTS teams (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +22,7 @@ db.serialize(() => {
     )
   `);
 
-    // Weeks use numeric week_number (unique, > 0)
+    // Weeks use numeric week_number (unique, > 0) and soft delete flag
     db.run(`
     CREATE TABLE IF NOT EXISTS weeks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +31,7 @@ db.serialize(() => {
     )
   `);
 
+    // Stats: one row per team+week combination
     db.run(`
     CREATE TABLE IF NOT EXISTS stats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,6 +49,33 @@ db.serialize(() => {
       UNIQUE(team_id, week_id),
       FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
       FOREIGN KEY(week_id) REFERENCES weeks(id) ON DELETE CASCADE
+    )
+  `);
+
+    // Per-team summary: max/min/avg per stat (all time)
+    db.run(`
+    CREATE TABLE IF NOT EXISTS team_stat_summary (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      team_id INTEGER NOT NULL,
+      stat TEXT NOT NULL,
+      max_value REAL,
+      min_value REAL,
+      avg_value REAL,
+      updated_at DATETIME,
+      UNIQUE(team_id, stat),
+      FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+    )
+  `);
+
+    // League-wide summary: max/min/avg per stat (all time)
+    db.run(`
+    CREATE TABLE IF NOT EXISTS league_stat_summary (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      stat TEXT NOT NULL UNIQUE,
+      max_value REAL,
+      min_value REAL,
+      avg_value REAL,
+      updated_at DATETIME
     )
   `);
 });
@@ -80,6 +107,89 @@ function allAsync(sql, params = []) {
             else resolve(rows);
         });
     });
+}
+
+const STAT_COLUMNS = [
+    "fg_pct",
+    "ft_pct",
+    "three_ptm",
+    "pts",
+    "reb",
+    "ast",
+    "st",
+    "blk",
+    "turnovers",
+];
+
+async function recomputeTeamSummary(teamId) {
+    const summary = {};
+
+    for (const col of STAT_COLUMNS) {
+        const row = await getAsync(
+            `SELECT MAX(${col}) AS maxVal,
+                    MIN(${col}) AS minVal,
+                    AVG(${col}) AS avgVal
+             FROM stats
+             WHERE team_id = ? AND ${col} IS NOT NULL`,
+            [teamId]
+        );
+
+        const maxVal = row && row.maxVal != null ? row.maxVal : null;
+        const minVal = row && row.minVal != null ? row.minVal : null;
+        const avgVal = row && row.avgVal != null ? row.avgVal : null;
+
+        summary[col] = { max: maxVal, min: minVal, avg: avgVal };
+
+        await runAsync(
+            `
+      INSERT INTO team_stat_summary (team_id, stat, max_value, min_value, avg_value, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(team_id, stat) DO UPDATE SET
+        max_value = excluded.max_value,
+        min_value = excluded.min_value,
+        avg_value = excluded.avg_value,
+        updated_at = excluded.updated_at
+      `,
+            [teamId, col, maxVal, minVal, avgVal]
+        );
+    }
+
+    return summary;
+}
+
+async function recomputeLeagueSummary() {
+    const summary = {};
+
+    for (const col of STAT_COLUMNS) {
+        const row = await getAsync(
+            `SELECT MAX(${col}) AS maxVal,
+                    MIN(${col}) AS minVal,
+                    AVG(${col}) AS avgVal
+             FROM stats
+             WHERE ${col} IS NOT NULL`
+        );
+
+        const maxVal = row && row.maxVal != null ? row.maxVal : null;
+        const minVal = row && row.minVal != null ? row.minVal : null;
+        const avgVal = row && row.avgVal != null ? row.avgVal : null;
+
+        summary[col] = { max: maxVal, min: minVal, avg: avgVal };
+
+        await runAsync(
+            `
+      INSERT INTO league_stat_summary (stat, max_value, min_value, avg_value, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(stat) DO UPDATE SET
+        max_value = excluded.max_value,
+        min_value = excluded.min_value,
+        avg_value = excluded.avg_value,
+        updated_at = excluded.updated_at
+      `,
+            [col, maxVal, minVal, avgVal]
+        );
+    }
+
+    return summary;
 }
 
 /* ---------------------- WEEKS ---------------------- */
@@ -122,26 +232,28 @@ app.post("/api/weeks", async (req, res) => {
             `INSERT INTO weeks (week_number) VALUES (?)`,
             [weekNumber]
         );
-
-        const created = await getAsync(
+        const newWeek = await getAsync(
             `SELECT id, week_number FROM weeks WHERE id = ?`,
             [result.lastID]
         );
-        res.json(created);
+        res.json(newWeek);
     } catch (err) {
         console.error("POST /api/weeks", err);
         res.status(500).send("Error creating week");
     }
 });
 
-// Soft-delete week
+// Soft delete a week
 app.delete("/api/weeks/:id", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
         await runAsync(
             `UPDATE weeks SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`,
             [id]
         );
+
         res.json({ success: true });
     } catch (err) {
         console.error("DELETE /api/weeks/:id", err);
@@ -153,7 +265,7 @@ app.delete("/api/weeks/:id", async (req, res) => {
 app.get("/api/weeks/deleted", async (req, res) => {
     try {
         const rows = await allAsync(
-            `SELECT id, week_number
+            `SELECT id, week_number, deleted_at
        FROM weeks
        WHERE deleted_at IS NOT NULL
        ORDER BY week_number ASC`
@@ -165,30 +277,33 @@ app.get("/api/weeks/deleted", async (req, res) => {
     }
 });
 
-// Restore a deleted week
+// Restore a soft-deleted week
 app.post("/api/weeks/:id/restore", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
         await runAsync(
             `UPDATE weeks SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`,
             [id]
         );
-        const row = await getAsync(
-            `SELECT id, week_number FROM weeks WHERE id = ?`,
-            [id]
-        );
-        res.json(row);
+
+        res.json({ success: true });
     } catch (err) {
         console.error("POST /api/weeks/:id/restore", err);
         res.status(500).send("Error restoring week");
     }
 });
 
-// Permanently delete a week
+// Permanently delete a week (and any stats referencing it)
 app.delete("/api/weeks/:id/permanent", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
+        await runAsync(`DELETE FROM stats WHERE week_id = ?`, [id]);
         await runAsync(`DELETE FROM weeks WHERE id = ?`, [id]);
+
         res.json({ success: true });
     } catch (err) {
         console.error("DELETE /api/weeks/:id/permanent", err);
@@ -249,47 +364,46 @@ app.get("/api/teams", async (req, res) => {
     }
 });
 
-// Create team (name + owner_name)
+// Create team
 app.post("/api/teams", async (req, res) => {
     try {
         let { name, owner } = req.body;
-        if (!name || !name.trim()) {
-            return res.status(400).send("Name is required");
-        }
-        name = name.trim();
-        owner = owner && owner.trim ? owner.trim() : null;
+        name = (name || "").trim();
+        owner = (owner || "").trim();
 
-        const existing = await getAsync(
-            `SELECT id FROM teams WHERE name = ? AND deleted_at IS NULL`,
-            [name]
-        );
-        if (existing) {
-            return res.status(400).send("Team name already exists");
+        if (!name) {
+            return res.status(400).send("Name is required");
         }
 
         const result = await runAsync(
             `INSERT INTO teams (name, owner_name) VALUES (?, ?)`,
-            [name, owner]
+            [name, owner || null]
         );
-        const created = await getAsync(
+        const newTeam = await getAsync(
             `SELECT id, name, owner_name FROM teams WHERE id = ?`,
             [result.lastID]
         );
-        res.json(created);
+        res.json(newTeam);
     } catch (err) {
         console.error("POST /api/teams", err);
+        if (err && err.message && err.message.includes("UNIQUE")) {
+            return res.status(400).send("Team name already exists");
+        }
         res.status(500).send("Error creating team");
     }
 });
 
-// Soft-delete team
+// Soft delete team
 app.delete("/api/teams/:id", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
         await runAsync(
             `UPDATE teams SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`,
             [id]
         );
+
         res.json({ success: true });
     } catch (err) {
         console.error("DELETE /api/teams/:id", err);
@@ -301,7 +415,7 @@ app.delete("/api/teams/:id", async (req, res) => {
 app.get("/api/teams/deleted", async (req, res) => {
     try {
         const rows = await allAsync(
-            `SELECT id, name, owner_name
+            `SELECT id, name, owner_name, deleted_at
        FROM teams
        WHERE deleted_at IS NOT NULL
        ORDER BY name COLLATE NOCASE ASC`
@@ -313,30 +427,34 @@ app.get("/api/teams/deleted", async (req, res) => {
     }
 });
 
-// Restore team
+// Restore a soft-deleted team
 app.post("/api/teams/:id/restore", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
         await runAsync(
             `UPDATE teams SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`,
             [id]
         );
-        const row = await getAsync(
-            `SELECT id, name, owner_name FROM teams WHERE id = ?`,
-            [id]
-        );
-        res.json(row);
+
+        res.json({ success: true });
     } catch (err) {
         console.error("POST /api/teams/:id/restore", err);
         res.status(500).send("Error restoring team");
     }
 });
 
-// Permanently delete team
+// Permanently delete team (and stats)
 app.delete("/api/teams/:id/permanent", async (req, res) => {
     try {
         const id = Number(req.params.id);
+        if (!id) return res.status(400).send("Invalid id");
+
+        await runAsync(`DELETE FROM stats WHERE team_id = ?`, [id]);
         await runAsync(`DELETE FROM teams WHERE id = ?`, [id]);
+        await runAsync(`DELETE FROM team_stat_summary WHERE team_id = ?`, [id]);
+
         res.json({ success: true });
     } catch (err) {
         console.error("DELETE /api/teams/:id/permanent", err);
@@ -349,26 +467,27 @@ app.patch("/api/teams/:id", async (req, res) => {
     try {
         const id = Number(req.params.id);
         let { name, owner } = req.body;
-        if (!name || !name.trim()) {
+        name = (name || "").trim();
+        owner = (owner || "").trim();
+
+        if (!name) {
             return res.status(400).send("Name is required");
         }
-        name = name.trim();
-        owner = owner && owner.trim ? owner.trim() : null;
 
-        const exists = await getAsync(
+        const existing = await getAsync(
             `SELECT id FROM teams
-       WHERE name = ? AND deleted_at IS NULL AND id <> ?`,
+       WHERE name = ? AND id <> ?`,
             [name, id]
         );
-        if (exists) {
+        if (existing) {
             return res.status(400).send("Team name already exists");
         }
 
         await runAsync(
             `UPDATE teams
        SET name = ?, owner_name = ?
-       WHERE id = ? AND deleted_at IS NULL`,
-            [name, owner, id]
+       WHERE id = ?`,
+            [name, owner || null, id]
         );
         const updated = await getAsync(
             `SELECT id, name, owner_name FROM teams WHERE id = ?`,
@@ -383,12 +502,12 @@ app.patch("/api/teams/:id", async (req, res) => {
 
 /* ---------------------- STATS ---------------------- */
 
-// Get stats for a week, including teams with no stats yet
+// Combined view of stats per week
 app.get("/api/stats", async (req, res) => {
     try {
         const weekId = Number(req.query.weekId);
         if (!weekId) {
-            return res.status(400).send("weekId is required");
+            return res.status(400).send("weekId required");
         }
 
         const rows = await allAsync(
@@ -422,37 +541,7 @@ app.get("/api/stats", async (req, res) => {
     }
 });
 
-// Download the raw SQLite DB file as a backup
-app.get("/api/export-db", (req, res) => {
-    const dbPath = path.join(__dirname, "fantasy.db");
-
-    fs.stat(dbPath, (err, stats) => {
-        if (err || !stats.isFile()) {
-            console.error("DB export error:", err);
-            return res.status(500).send("Database file not found");
-        }
-
-        res.setHeader("Content-Type", "application/octet-stream");
-        res.setHeader(
-            "Content-Disposition",
-            'attachment; filename="fantasy.db"'
-        );
-
-        const stream = fs.createReadStream(dbPath);
-        stream.on("error", (err) => {
-            console.error("DB export stream error:", err);
-            if (!res.headersSent) {
-                res.status(500).end("Error reading database file");
-            } else {
-                res.end();
-            }
-        });
-        stream.pipe(res);
-    });
-});
-
-
-// Upsert stats for a team-week
+// Upsert stats for a team+week
 app.post("/api/stats", async (req, res) => {
     try {
         const {
@@ -479,15 +568,15 @@ app.post("/api/stats", async (req, res) => {
         );
 
         const params = [
-            fg_pct,
-            ft_pct,
-            three_ptm,
-            pts,
-            reb,
-            ast,
-            st,
-            blk,
-            turnovers,
+            fg_pct ?? null,
+            ft_pct ?? null,
+            three_ptm ?? null,
+            pts ?? null,
+            reb ?? null,
+            ast ?? null,
+            st ?? null,
+            blk ?? null,
+            turnovers ?? null,
         ];
 
         if (existing) {
@@ -513,10 +602,41 @@ app.post("/api/stats", async (req, res) => {
             );
         }
 
+        await recomputeTeamSummary(teamId);
+        await recomputeLeagueSummary();
         res.json({ success: true });
     } catch (err) {
         console.error("POST /api/stats", err);
         res.status(500).send("Error saving stats");
+    }
+});
+
+/* ---------------------- STAT SUMMARIES ---------------------- */
+
+// Per-team summary: all-time max/min/avg for each stat
+app.get("/api/team-summary/:teamId", async (req, res) => {
+    const teamId = Number(req.params.teamId);
+    if (!teamId) {
+        return res.status(400).send("Invalid teamId");
+    }
+
+    try {
+        const summary = await recomputeTeamSummary(teamId);
+        res.json(summary);
+    } catch (err) {
+        console.error("GET /api/team-summary/:teamId", err);
+        res.status(500).send("Error computing team summary");
+    }
+});
+
+// League summary: all-time max/min/avg for each stat
+app.get("/api/league-summary", async (req, res) => {
+    try {
+        const summary = await recomputeLeagueSummary();
+        res.json(summary);
+    } catch (err) {
+        console.error("GET /api/league-summary", err);
+        res.status(500).send("Error computing league summary");
     }
 });
 
